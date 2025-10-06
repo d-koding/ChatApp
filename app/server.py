@@ -1,49 +1,44 @@
-import socket # for socket programming
-import threading # for each connection thread
-
+import socket
+import threading
 
 def handle_connection(connection_socket, address):
     """
-    actions for each connection
+    Handle messages from a connected peer.
     """
     while True:
-        # receive data in bytes
         data = connection_socket.recv(1024)
+        if not data:
+            break
 
-        # decode the received data to string and print out
         message = data.decode()
         print("Got message from", address, ":", message)
 
-        # convert it to uppercase and send back
+        # Echo back in uppercase
         connection_socket.send(message.upper().encode())
 
-        # stop checking messages and break
-        if message == "close":
+        if message.lower() == "close":
             break
 
     connection_socket.close()
 
 
-def server():
-    # create a listening socket
-    s = socket.socket()
-
-    # bind it to a port
-    port = 1234
-    s.bind(("", port)) # input is a tuple with address and port as elements
-
-    # keep listening
+def start_server(port):
+    """
+    Start a server socket listening on the given port.
+    Returns the socket so the main shell can access it.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("", port))
     s.listen(10)
-    while True:
-        # accept connection request
-        connection_socket, address = s.accept()
-        print("Got connection from", address)
+    print(f"Server listening on port {port}")
 
-        # create a thread to handle the accepted client
-        thread = threading.Thread(target=handle_connection,
-        args=(connection_socket, address), daemon=True)
-        thread.start() # start the thread
+    # Run the accept loop in a background thread
+    def accept_loop():
+        while True:
+            conn, addr = s.accept()
+            print("Got connection from", addr)
+            threading.Thread(target=handle_connection, args=(conn, addr), daemon=True).start()
 
+    threading.Thread(target=accept_loop, daemon=True).start()
 
-if __name__ == "__main__":
-    server()
+    return s
