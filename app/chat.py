@@ -1,7 +1,7 @@
 import socket # for socket programming
 import threading # for each connection thread
 import sys
-from server import start_server
+# from server import start_server
 
 
 # --- GLOBALS ----
@@ -10,6 +10,78 @@ _NEW_ID = 1
 _SERVER_SOCKET = None
 _LISTENING_PORT = None
 _MY_IP = None
+
+
+def handle_connection(connection_socket, address):
+    """
+    Handle messages from a connected peer.
+    Automatically closes and removes the connection when done.
+    """
+    global _CONNECTIONS
+
+    try:
+        while True:
+            data = connection_socket.recv(1024)
+            if not data:
+                break
+
+            message = data.decode().strip()
+            print(f'>> Message received from {address[0]}:{address[1]}: "{message}"')
+
+            # If peer sends a terminate signal
+            if message.upper() == "TERMINATE":
+                print(f"Peer {address[0]} terminates the connection.")
+                break
+
+    except Exception as e:
+        print(f"Error with connection {address}: {e}")
+
+    finally:
+        # Close the socket
+        connection_socket.close()
+
+        # Find and remove the connection entry from _CONNECTIONS
+        removed_id = None
+        for cid, (ip, port, sock) in list(_CONNECTIONS.items()):
+            if sock == connection_socket:
+                removed_id = cid
+                del _CONNECTIONS[cid]
+                break
+
+        if removed_id is not None:
+            print(f"Closed connection {removed_id} ({address[0]}:{address[1]})")
+        else:
+            print(f"Closed unknown connection ({address[0]}:{address[1]})")
+
+
+def start_server(port):
+    """
+    Start a server socket listening on the given port.
+    Returns the socket so the main shell can access it.
+    """
+    global _CONNECTIONS
+    global _NEW_ID
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("", port))
+    s.listen(10)
+    print(f"Server listening on port {port}")
+
+    # Run the accept loop in a background thread
+    def accept_loop():
+        while True:
+            new_conn, new_addr = s.accept()
+            new_ip, new_port = new_addr
+            print(f"Got new connection from {new_ip}: {new_port}")
+
+            threading.Thread(target=handle_connection, args=(new_conn, new_addr), daemon=True).start()
+
+            _CONNECTIONS[_NEW_ID] = (new_ip, new_port, new_conn)
+            _NEW_ID += 1
+
+    threading.Thread(target=accept_loop, daemon=True).start()
+
+    return s
 
 
 """
@@ -51,6 +123,10 @@ def handle_connect(ip, port):
     s.connect((ip, int(port)))
     _CONNECTIONS[_NEW_ID] = (ip, port, s)
     _NEW_ID += 1
+    
+
+The connection to peer 192.168.21.21 is
+successfully established;
 
 
 """
@@ -59,46 +135,70 @@ Print out all IP addresses and portnumbers in list
 def handle_list():
     global _CONNECTIONS
     
-    for id, pair in _CONNECTIONS.items():
-        print(f"ID: {id}, IP address: {pair[0]}, Port Number: {pair[1]}")
+    print("id:    IP address       Port No.")
+    for id, (ip, port, _) in _CONNECTIONS.items():
+        print(f"{id:<5}  {ip:<15}  {port}")
 
 
-"""
-Terminate a connection if it exists in the global dictionary
-"""
-def handle_terminate(id):
+def handle_send(conn_id, message):
+    """
+    Send a message to a connected peer given its connection ID.
+    """
     global _CONNECTIONS
+    conn_id = int(conn_id)
 
-    if id in _CONNECTIONS:
-        ip, _, s = _CONNECTIONS[id]
-        s.close()
-        del _CONNECTIONS[id]
-    else:
-        print(f"ERROR: ID not in active _CONNECTIONS")
+    if conn_id not in _CONNECTIONS:
+        print(f"ERROR: Connection ID {conn_id} not found.")
+        return
+
+    ip, port, sock = _CONNECTIONS[conn_id]
+
+    try:
+        sock.send(message.encode())
+        print(f"Message sent to {ip}:{port}: {message}")
+
+    except Exception as e:
+        print(f"ERROR: Could not send to {ip}:{port} ({e})")
+        sock.close()
+        del _CONNECTIONS[conn_id]
 
 
-def handle_send(id, message):
+def handle_terminate(conn_id):
     global _CONNECTIONS
+    conn_id = int(conn_id)
 
-    server_ip = _CONNECTIONS[i][0]
-    server_port = _CONNECTIONS[i][1]
-    server_socket = _CONNECTIONS[i][2]
+    if conn_id not in _CONNECTIONS:
+        print(f"[Error] ID {conn_id} not in active connections.")
+        return
 
-    server_socket.send(message.encode())
+    ip, port, sock = _CONNECTIONS[conn_id]
 
-    
+    # Notify peer of termination
+    try:
+        sock.send("TERMINATE".encode())
+    except Exception as e:
+        print(f"ERROR sending terminate message: {e}")
+
+    sock.close()
+    del _CONNECTIONS[conn_id]
 
 
 def handle_exit():
     global _CONNECTIONS
     global _SERVER_SOCKET
 
-    for connection in _CONNECTIONS.values():
-        connection[2].close()
-    _CONNECTIONS.clear()
+    for conn_id in list(_CONNECTIONS.keys()):
+        try:
+            handle_send(conn_id, "TERMINATE")
+            ip, port, sock = _CONNECTIONS[conn_id]
+            sock.close()
+        except Exception as e:
+            print(f"Error closing connection {conn_id}: {e}")
 
+    _CONNECTIONS.clear()
     _SERVER_SOCKET.close()
-    
+    sys.exit(0)
+
 
 def main():
     global _MY_IP
