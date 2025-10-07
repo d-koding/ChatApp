@@ -1,7 +1,6 @@
 import socket # for socket programming
 import threading # for each connection thread
 import sys
-# from server import start_server
 
 
 # --- GLOBALS ----
@@ -12,12 +11,20 @@ _LISTENING_PORT = None
 _MY_IP = None
 
 
-def handle_connection(connection_socket, address):
+def handle_server_connection(connection_socket, address):
     """
     Handle messages from a connected peer.
     Automatically closes and removes the connection when done.
     """
-    global _CONNECTIONS
+    global _CONNECTIONS, _NEW_ID
+
+    # Register if new
+    if not any(sock == connection_socket for _, (_, _, sock) in _CONNECTIONS.items()):
+        _CONNECTIONS[_NEW_ID] = (address[0], address[1], connection_socket)
+        print(f">> Added incoming connection from {address[0]}:{address[1]} with ID {_NEW_ID}")
+        _NEW_ID += 1
+
+    print(f">> The connection to peer {address[0]} is successfully established")
 
     try:
         while True:
@@ -26,21 +33,20 @@ def handle_connection(connection_socket, address):
                 break
 
             message = data.decode().strip()
-            print(f'>> Message received from {address[0]}:{address[1]}: "{message}"')
 
-            # If peer sends a terminate signal
-            if message.upper() == "TERMINATE":
+            if message.lower() == "terminate":
                 print(f"Peer {address[0]} terminates the connection.")
                 break
+
+            print(f'>> Message received from {address[0]}: "{message}"')
 
     except Exception as e:
         print(f"Error with connection {address}: {e}")
 
     finally:
-        # Close the socket
+        # Clean up
         connection_socket.close()
 
-        # Find and remove the connection entry from _CONNECTIONS
         removed_id = None
         for cid, (ip, port, sock) in list(_CONNECTIONS.items()):
             if sock == connection_socket:
@@ -48,7 +54,7 @@ def handle_connection(connection_socket, address):
                 del _CONNECTIONS[cid]
                 break
 
-        if removed_id is not None:
+        if removed_id:
             print(f"Closed connection {removed_id} ({address[0]}:{address[1]})")
         else:
             print(f"Closed unknown connection ({address[0]}:{address[1]})")
@@ -72,9 +78,8 @@ def start_server(port):
         while True:
             new_conn, new_addr = s.accept()
             new_ip, new_port = new_addr
-            print(f"Got new connection from {new_ip}: {new_port}")
 
-            threading.Thread(target=handle_connection, args=(new_conn, new_addr), daemon=True).start()
+            threading.Thread(target=handle_server_connection, args=(new_conn, new_addr), daemon=True).start()
 
             _CONNECTIONS[_NEW_ID] = (new_ip, new_port, new_conn)
             _NEW_ID += 1
@@ -84,10 +89,10 @@ def start_server(port):
     return s
 
 
-"""
-Display available commands and their usage
-"""
 def handle_help():
+    """
+    Display available commands and their usage
+    """
     print("Available commands:")
     print("  myip                : Display the IP address of this device")
     print("  myport              : Display the port number this process runs on")
@@ -106,33 +111,38 @@ def handle_myport():
     print(f"The program runs on port number {_LISTENING_PORT}")
 
 
-def handle_connect(ip, port):
+def handle_connect(dest_ip, dest_port):
+    """
+    Initiate a connection to another peer and register it.
+    """
     global _CONNECTIONS
     global _NEW_ID
 
-    if ip == _MY_IP:
-        print("CANNOT CONNECT TO SELF")
-        return
-        
-    for (current_ip, port, socket) in _CONNECTIONS.values():
-        if ip == current_ip:
-            print("CANNOT CONNECT TO DUPLICATE")
-            return
-  
-    s = socket.socket()
-    s.connect((ip, int(port)))
-    _CONNECTIONS[_NEW_ID] = (ip, port, s)
-    _NEW_ID += 1
-    
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect((dest_ip, int(dest_port)))
 
-The connection to peer 192.168.21.21 is
-successfully established;
+        # Add to connection list
+        _CONNECTIONS[_NEW_ID] = (dest_ip, int(dest_port), sock)
+        print(f">> The connection to peer {dest_ip} is successfully established")
+
+        # Start thread to listen for messages from this peer
+        threading.Thread(
+            target=handle_server_connection,
+            args=(sock, (dest_ip, int(dest_port))),
+            daemon=True
+        ).start()
+
+        _NEW_ID += 1
+
+    except Exception as e:
+        print(f"ERROR: Could not connect to {dest_ip}:{dest_port} ({e})")
 
 
-"""
-Print out all IP addresses and portnumbers in list
-"""
 def handle_list():
+    """
+    Print out all IP addresses and portnumbers in list
+    """
     global _CONNECTIONS
     
     print("id:    IP address       Port No.")
@@ -175,7 +185,7 @@ def handle_terminate(conn_id):
 
     # Notify peer of termination
     try:
-        sock.send("TERMINATE".encode())
+        sock.send("terminate".encode())
     except Exception as e:
         print(f"ERROR sending terminate message: {e}")
 
@@ -189,9 +199,7 @@ def handle_exit():
 
     for conn_id in list(_CONNECTIONS.keys()):
         try:
-            handle_send(conn_id, "TERMINATE")
-            ip, port, sock = _CONNECTIONS[conn_id]
-            sock.close()
+            handle_terminate(conn_id)
         except Exception as e:
             print(f"Error closing connection {conn_id}: {e}")
 
@@ -246,7 +254,9 @@ def main():
             case "terminate":
                 handle_terminate(message_parts[1])
             case "send":
-                handle_send(message_parts[1], message_parts[2])
+                conn_id = message_parts[1]
+                msg = " ".join(message_parts[2:])
+                handle_send(conn_id, msg)
             case "exit":
                 handle_exit()
             case _:
