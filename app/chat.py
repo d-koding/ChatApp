@@ -1,5 +1,5 @@
-import socket # for socket programming
-import threading # for each connection thread
+import socket
+import threading
 import sys
 
 
@@ -55,9 +55,6 @@ def handle_server_connection(connection_socket, address):
                 del _CONNECTIONS[cid]
                 break
 
-        if removed_id:
-            print(f"\nClosed connection {removed_id} ({address[0]}:{address[1]})\n>> ", end="")
-
 
 def start_server(port):
     """
@@ -96,10 +93,10 @@ def start_server(port):
 
     return s
 
-
+    
 def handle_help():
     """
-    Display available commands and their usage
+    Display the list of available commands and their usage.
     """
     print("Available commands:")
     print("  myip                : Display the IP address of this device")
@@ -112,16 +109,23 @@ def handle_help():
 
 
 def handle_myip():
+    """
+    Display IP address of the local machine running the program.
+    """
     print(f"The IP address is {_MY_IP}")
 
 
 def handle_myport():
+    """
+    Display the port number on which the program is currently running.
+    """
     print(f"The program runs on port number {_LISTENING_PORT}")
 
 
 def handle_connect(dest_ip, dest_port):
     """
-    Initiate a connection to another peer and register it.
+    Connect to a remote peer and register the connection.
+    Prevents connecting to self or to an already connected peer.
     """
     global _CONNECTIONS
     global _NEW_ID
@@ -165,7 +169,9 @@ def handle_connect(dest_ip, dest_port):
 
 def handle_list():
     """
-    Print out all IP addresses and portnumbers in list
+    Display all active connections.
+    Prints the connection ID, IP address, and port number for
+    each currently connected peer.
     """
     global _CONNECTIONS
     
@@ -176,7 +182,7 @@ def handle_list():
 
 def handle_send(conn_id, message):
     """
-    Send a message to a connected peer given its connection ID.
+    Send a message to a connected peer using its connection ID.
     """
     global _CONNECTIONS
     conn_id = int(conn_id)
@@ -198,6 +204,11 @@ def handle_send(conn_id, message):
 
 
 def handle_terminate(conn_id):
+    """
+    Terminates connection with a specified ID.
+    Prints error if conn_id is not in active connection, 
+    otherwise notifies peer of successful termination.
+    """
     global _CONNECTIONS
     conn_id = int(conn_id)
 
@@ -219,6 +230,9 @@ def handle_terminate(conn_id):
 
 
 def handle_exit():
+    """
+    Quit the current program and terminate all connections.
+    """
     global _CONNECTIONS
     global _SERVER_SOCKET
 
