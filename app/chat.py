@@ -38,7 +38,9 @@ def handle_server_connection(connection_socket, address):
                 print(f"\nPeer {address[0]} terminates the connection\n>> ", end="")
                 break
 
-            print(f'\nMessage received from {address[0]}: "{message}"\n>> ', end="")
+            print(f'\nMessage received from {address[0]}')
+            print(f'Sender\'s port: {address[1]}')
+            print(f'Message: "{message}"\n>> ', end="")
 
     except Exception as e:
         print(f"Error with connection {address}: {e}")
@@ -192,12 +194,17 @@ def handle_send(conn_id, message):
     if conn_id not in _CONNECTIONS:
         print(f"ERROR: Connection ID {conn_id} not found.")
         return
+    
+    # Enforce 100-character limit
+    if len(message) > 100:
+        print("ERROR: Message exceeds 100 characters and will not be sent.")
+        return
 
     ip, port, sock = _CONNECTIONS[conn_id]
 
     try:
         sock.send(message.encode())
-        print(f"Message sent to {ip}:{port}: {message}")
+        print(f"Message sent to {conn_id}")
 
     except Exception as e:
         print(f"ERROR: Could not send to {ip}:{port} ({e})")
