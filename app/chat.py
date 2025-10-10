@@ -14,6 +14,7 @@ _MY_IP = None
 def handle_server_connection(connection_socket, address):
     """
     Handle messages from a connected peer.
+    Prints received messages and listens for 'terminate' message.
     Automatically closes and removes the connection when done.
     """
     global _CONNECTIONS
@@ -126,6 +127,7 @@ def handle_connect(dest_ip, dest_port):
     """
     Connect to a remote peer and register the connection.
     Prevents connecting to self or to an already connected peer.
+    Also, adds the connection to _CONNECTIONS and starts a listener thread.
     """
     global _CONNECTIONS
     global _NEW_ID
