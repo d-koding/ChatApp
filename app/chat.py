@@ -13,51 +13,6 @@ _MY_IP = None
 _FILE_DELIMITER = '|'
 
 
-def handle_send_file(conn_id, filename):
-    """
-    Sends a file to a connected peer.
-    The file must exist in the same directory as the chat app.
-    """
-    global _CONNECTIONS
-    conn_id = int(conn_id)
-
-    if conn_id not in _CONNECTIONS:
-        print(f"ERROR: No active connection with ID {conn_id}")
-        return
-
-    if not os.path.exists(filename):
-        print(f"ERROR: File '{filename}' not found in current directory.")
-        return
-
-    connection = _CONNECTIONS[conn_id][2]
-    filesize = os.path.getsize(filename)
-
-    try:
-        print(f"Sending file '{filename}' ({filesize} bytes) to peer {conn_id}...")
-
-        # --- Step 1: Send header (newline terminated) ---
-        header = f"FILE_START{_FILE_DELIMITER}{os.path.basename(filename)}{_FILE_DELIMITER}{filesize}\n"
-        connection.sendall(header.encode())
-
-        # --- Step 2: Send file in chunks ---
-        with open(filename, "rb") as f:
-            sent = 0
-            while True:
-                chunk = f.read(4096)
-                if not chunk:
-                    break
-                connection.sendall(chunk)
-                sent += len(chunk)
-                # Optional progress indicator
-                print(f"\rProgress: {sent / filesize * 100:.1f}%", end="")
-
-        print()  # newline after progress
-        print(f"File '{filename}' successfully sent ({filesize} bytes).")
-
-    except Exception as e:
-        print(f"ERROR sending file: {e}")
-
-
 def handle_server_connection(connection_socket, address):
     """
     Handle messages from a connected peer.
@@ -73,7 +28,6 @@ def handle_server_connection(connection_socket, address):
         _CONNECTIONS[_NEW_ID] = (address[0], address[1], connection_socket)
         print(f"\nAdded incoming connection from {address[0]}:{address[1]} with ID {_NEW_ID}\n>> ", end="")
         _NEW_ID += 1
-
 
     try:
         while True:
@@ -93,6 +47,7 @@ def handle_server_connection(connection_socket, address):
                     header_data += chunk
 
                 header_str = header_data.decode(errors="ignore").strip()
+                
                 try:
                     _, filename, filesize_str = header_str.split(_FILE_DELIMITER)
                     filesize = int(filesize_str)
@@ -332,6 +287,51 @@ def handle_terminate(conn_id):
     # Remove from connection list (if not already deleted)
     if conn_id in _CONNECTIONS:
         del _CONNECTIONS[conn_id]
+
+
+def handle_send_file(conn_id, filename):
+    """
+    Sends a file to a connected peer.
+    The file must exist in the same directory as the chat app.
+    """
+    global _CONNECTIONS
+    conn_id = int(conn_id)
+
+    if conn_id not in _CONNECTIONS:
+        print(f"ERROR: No active connection with ID {conn_id}")
+        return
+
+    if not os.path.exists(filename):
+        print(f"ERROR: File '{filename}' not found in current directory.")
+        return
+
+    connection = _CONNECTIONS[conn_id][2]
+    filesize = os.path.getsize(filename)
+
+    try:
+        print(f"Sending file '{filename}' ({filesize} bytes) to peer {conn_id}...")
+
+        # Send header
+        header = f"FILE_START{_FILE_DELIMITER}{os.path.basename(filename)}{_FILE_DELIMITER}{filesize}\n"
+        connection.sendall(header.encode())
+
+        # Send file in chunks
+        with open(filename, "rb") as f:
+            sent = 0
+            while True:
+                chunk = f.read(4096)
+                if not chunk:
+                    break
+                connection.sendall(chunk)
+                sent += len(chunk)
+
+                print(f"\rProgress: {sent / filesize * 100:.1f}%", end="")
+
+        print()  # newline after progress
+        print(f"File '{filename}' successfully sent ({filesize} bytes).")
+
+    except Exception as e:
+        print(f"ERROR sending file: {e}")
 
 
 def handle_exit():
