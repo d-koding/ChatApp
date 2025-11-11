@@ -1,6 +1,7 @@
 import socket
 import threading
 import sys
+import os
 
 
 # --- GLOBALS ----
@@ -9,6 +10,51 @@ _NEW_ID = 1
 _SERVER_SOCKET = None
 _LISTENING_PORT = None
 _MY_IP = None
+_FILE_DELIMITER = '|'
+
+
+def handle_send_file(conn_id, filename):
+    """
+    Sends a file to a connected peer.
+    The file must exist in the same directory as the chat app.
+    """
+    global _CONNECTIONS
+
+    if conn_id not in _CONNECTIONS:
+        print(f"ERROR: No active connection with ID {conn_id}")
+        return
+
+    if not os.path.exists(filename):
+        print(f"ERROR: File '{filename}' not found in current directory.")
+        return
+
+    connection = _CONNECTIONS[conn_id][2]
+    filesize = os.path.getsize(filename)
+
+    try:
+        print(f"Sending file '{filename}' ({filesize} bytes) to peer {conn_id}...")
+
+        # --- Step 1: Send header (newline terminated) ---
+        header = f"FILE_START{_FILE_DELIMITER}{os.path.basename(filename)}{_FILE_DELIMITER}{filesize}\n"
+        connection.sendall(header.encode())
+
+        # --- Step 2: Send file in chunks ---
+        with open(filename, "rb") as f:
+            sent = 0
+            while True:
+                chunk = f.read(4096)
+                if not chunk:
+                    break
+                connection.sendall(chunk)
+                sent += len(chunk)
+                # Optional progress indicator
+                print(f"\rProgress: {sent / filesize * 100:.1f}%", end="")
+
+        print()  # newline after progress
+        print(f"File '{filename}' successfully sent ({filesize} bytes).")
+
+    except Exception as e:
+        print(f"ERROR sending file: {e}")
 
 
 def handle_server_connection(connection_socket, address):
@@ -19,6 +65,7 @@ def handle_server_connection(connection_socket, address):
     """
     global _CONNECTIONS
     global _NEW_ID
+    global _FILE_DELIMITER
 
     # Register if new
     if not any(sock == connection_socket for _, (_, _, sock) in _CONNECTIONS.items()):
@@ -26,21 +73,64 @@ def handle_server_connection(connection_socket, address):
         print(f"\nAdded incoming connection from {address[0]}:{address[1]} with ID {_NEW_ID}\n>> ", end="")
         _NEW_ID += 1
 
+
     try:
         while True:
-            data = connection_socket.recv(1024)
-            if not data:
-                break
+            # Read initial header line (can be fragmented)
+            header_data = b""
+            while not header_data.endswith(b"\n"):
+                chunk = connection_socket.recv(1)
+                if not chunk:
+                    break  # connection closed
+                header_data += chunk
 
-            message = data.decode().strip()
+            if not header_data:
+                break  # socket closed
 
-            if message.lower() == "terminate":
-                print(f"\nPeer {address[0]} terminates the connection\n>> ", end="")
-                break
+            header_str = header_data.decode(errors="ignore").strip()
 
-            print(f'\nMessage received from {address[0]}')
-            print(f'Sender\'s port: {address[1]}')
-            print(f'Message: "{message}"\n>> ', end="")
+            # --- FILE LOGIC ---
+            if header_str.startswith("FILE_START"):
+                try:
+                    _, filename, filesize_str = header_str.split(_FILE_DELIMITER)
+                    filesize = int(filesize_str)
+
+                    print(f"\nReceiving file '{filename}' ({filesize} bytes)...")
+
+                    output_filename = os.path.basename(filename)
+                    received_size = 0
+
+                    # Read file content until we've received all bytes
+                    with open(output_filename, "wb") as f:
+                        while received_size < filesize:
+                            bytes_to_read = min(4096, filesize - received_size)
+                            chunk = connection_socket.recv(bytes_to_read)
+                            if not chunk:
+                                print("ERROR: Connection closed before file complete.")
+                                break
+                            f.write(chunk)
+                            received_size += len(chunk)
+
+                    if received_size == filesize:
+                        print(f"File '{filename}' received successfully and saved as '{output_filename}'\n>> ", end="")
+                    else:
+                        print(f"File '{filename}' incomplete ({received_size}/{filesize} bytes).\n>> ", end="")
+
+                except Exception as e:
+                    print(f"\nError receiving file: {e}\n>> ", end="")
+                continue  # Go back to listening for next message or file
+
+            # --- MESSAGE LOGIC ---
+            else:
+                message = data.decode().strip()
+
+                if message.lower() == "terminate":
+                    print(f"\nPeer {address[0]} terminates the connection\n>> ", end="")
+                    break
+
+                print(f'\nMessage received from {address[0]}')
+                print(f'Sender\'s port: {address[1]}')
+                print(f'Message: "{message}"\n>> ', end="")
 
     except Exception as e:
         print(f"Error with connection {address}: {e}")
@@ -102,13 +192,14 @@ def handle_help():
     Display the list of available commands and their usage.
     """
     print("Available commands:")
-    print("  myip                : Display the IP address of this device")
-    print("  myport              : Display the port number this process runs on")
-    print("  connect <ip> <port> : Establish a new TCP connection to the given destination")
-    print("  list                : Display all active connections")
-    print("  terminate <id>      : Terminate connection according to the list index")
-    print("  send <id> <message> : Send a message to the host on the specified connection")
-    print("  exit                : Close all connections and terminate this process")
+    print("  myip                      : Display the IP address of this device")
+    print("  myport                    : Display the port number this process runs on")
+    print("  connect <ip> <port>       : Establish a new TCP connection to the given destination")
+    print("  list                      : Display all active connections")
+    print("  terminate <id>            : Terminate connection according to the list index")
+    print("  send <id> <message>       : Send a message to the host on the specified connection")
+    print("  sendfile <id> <filename>  : Send a file to the host on the specified connection")
+    print("  exit                      : Close all connections and terminate this process")
 
 
 def handle_myip():
@@ -311,6 +402,11 @@ def main():
                     conn_id = message_parts[1]
                     msg = " ".join(message_parts[2:])
                     handle_send(conn_id, msg)
+            case "sendfile":
+                if len(message_parts) < 3:
+                    print("Usage: sendfile <id> <filename>")
+                else:
+                    handle_send_file(message_parts[1], message_parts[2])
             case "exit":
                 handle_exit()
             case _:
