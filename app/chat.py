@@ -19,6 +19,7 @@ def handle_send_file(conn_id, filename):
     The file must exist in the same directory as the chat app.
     """
     global _CONNECTIONS
+    conn_id = int(conn_id)
 
     if conn_id not in _CONNECTIONS:
         print(f"ERROR: No active connection with ID {conn_id}")
@@ -76,31 +77,30 @@ def handle_server_connection(connection_socket, address):
 
     try:
         while True:
-            # Read initial header line (can be fragmented)
-            header_data = b""
-            while not header_data.endswith(b"\n"):
-                chunk = connection_socket.recv(1)
-                if not chunk:
-                    break  # connection closed
-                header_data += chunk
-
-            if not header_data:
-                break  # socket closed
-
-            header_str = header_data.decode(errors="ignore").strip()
+            # Peek at the first chunk without removing it from buffer
+            peek_data = connection_socket.recv(12, socket.MSG_PEEK)
+            if not peek_data:
+                break
 
             # --- FILE LOGIC ---
-            if header_str.startswith("FILE_START"):
+            if peek_data.decode(errors="ignore").startswith("FILE_START"):
+                # Read the full header line (ends with newline)
+                header_data = b""
+                while not header_data.endswith(b"\n"):
+                    chunk = connection_socket.recv(1)
+                    if not chunk:
+                        break
+                    header_data += chunk
+
+                header_str = header_data.decode(errors="ignore").strip()
                 try:
                     _, filename, filesize_str = header_str.split(_FILE_DELIMITER)
                     filesize = int(filesize_str)
-
                     print(f"\nReceiving file '{filename}' ({filesize} bytes)...")
 
                     output_filename = os.path.basename(filename)
                     received_size = 0
 
-                    # Read file content until we've received all bytes
                     with open(output_filename, "wb") as f:
                         while received_size < filesize:
                             bytes_to_read = min(4096, filesize - received_size)
@@ -112,25 +112,30 @@ def handle_server_connection(connection_socket, address):
                             received_size += len(chunk)
 
                     if received_size == filesize:
-                        print(f"File '{filename}' received successfully and saved as '{output_filename}'\n>> ", end="")
+                        print(f"File '{filename}' received successfully.\n>> ", end="")
                     else:
                         print(f"File '{filename}' incomplete ({received_size}/{filesize} bytes).\n>> ", end="")
 
                 except Exception as e:
                     print(f"\nError receiving file: {e}\n>> ", end="")
-                continue  # Go back to listening for next message or file
+
+                continue  # Go back to listen for next message/file
 
             # --- MESSAGE LOGIC ---
             else:
+                data = connection_socket.recv(1024)
+                if not data:
+                    break
+
                 message = data.decode().strip()
 
                 if message.lower() == "terminate":
                     print(f"\nPeer {address[0]} terminates the connection\n>> ", end="")
                     break
 
-                print(f'\nMessage received from {address[0]}')
-                print(f'Sender\'s port: {address[1]}')
-                print(f'Message: "{message}"\n>> ', end="")
+                print(f"\nMessage received from {address[0]}")
+                print(f"Sender's port: {address[1]}")
+                print(f"Message: \"{message}\"\n>> ", end="")
 
     except Exception as e:
         print(f"Error with connection {address}: {e}")
